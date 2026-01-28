@@ -1,4 +1,4 @@
-async def create_job():
+async def create_job(data):
     pass
 
 
@@ -6,11 +6,11 @@ async def get_job(job_id):
     pass
 
 
-async def list_jobs():
+async def list_jobs(job_id):
     pass
 
 
-async def delete_job(job_id):
+async def delete_job(force, job_id):
     pass
 
 
@@ -19,11 +19,11 @@ async def update_job(job_id):
 
 
 # Actions
-async def pause_job(job_id):
+async def pause_job(reason, job_id):
     pass
 
 
-async def resume_job(job_id):
+async def resume_job(reason, job_id):
     pass
 
 
