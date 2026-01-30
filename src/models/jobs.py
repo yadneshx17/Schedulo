@@ -73,7 +73,7 @@ class Jobs(Base):
 
     # Relationships
     job_runs = relationship(
-        "Jobs_Run", back_populates="job", cascade="all, delete-orphan"
+        "Job_Runs", back_populates="job", cascade="all, delete-orphan"
     )
 
     # Indexes for performance

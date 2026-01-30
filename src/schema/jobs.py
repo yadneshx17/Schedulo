@@ -19,7 +19,7 @@ class CreateJob(BaseModel):
     max_retries: int = Field(default=3, description="Maximum number of retries")
     retry_backoff_seconds: int = Field(default=300, description="Backoff time between retries in seconds")
     retry_strategy: RetryStrategy = Field(default=RetryStrategy.FIXED, description="Retry strategy")
-
+              
 
 class UpdateJob(BaseModel):
     """Schema for updating an existing job."""

@@ -18,7 +18,7 @@ from src.db import Base
 from src.states import JobRunStatus
 
 
-class Job_run(Base):
+class Job_Runs(Base):
     """
     Attributes:
         attempt: Attempt number of task execution

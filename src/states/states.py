@@ -14,8 +14,8 @@ class JobStatus(Enum):
 
 
 class RetryStrategy(Enum):
-    FIXED = "fixed"
-    EXPONENTIAL = "exponential"
+    FIXED = "FIXED"
+    EXPONENTIAL = "EXPONENTIAL"
 
 class JobRunStatus(Enum):
     STARTED = "STARTED"
