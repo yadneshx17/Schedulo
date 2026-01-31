@@ -41,7 +41,7 @@ class Jobs(Base):
         Enum(JobStatus, name="job_status_enum"),
         nullable=False,
         index=True,
-        default=JobStatus.PENDING,
+        default=JobStatus.CREATED,
     )
 
     # Retry fields

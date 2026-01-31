@@ -3,7 +3,6 @@ from enum import Enum
 
 class JobStatus(Enum):
     CREATED = "CREATED"
-    PENDING = "PENDING"
     SCHEDULED = "SCHEDULED"
     READY = "READY"
     RUNNING = "RUNNING"
@@ -12,10 +11,14 @@ class JobStatus(Enum):
     RETRYING = "RETRYING"
     DEAD = "DEAD"
 
+    PAUSE = "PAUSE"
+    RESUME = "RESUME"
+
 
 class RetryStrategy(Enum):
     FIXED = "FIXED"
     EXPONENTIAL = "EXPONENTIAL"
+
 
 class JobRunStatus(Enum):
     STARTED = "STARTED"
@@ -23,10 +26,12 @@ class JobRunStatus(Enum):
     FAILED = "FAILED"
     TIMEOUT = "TIMEOUT"
 
+
 ALLOWED_TRANSITIONS = {
-    JobStatus.CREATED: {JobStatus.PENDING},
-    JobStatus.PENDING: {JobStatus.SCHEDULED},
-    JobStatus.SCHEDULED: {JobStatus.READY},
+    JobStatus.CREATED: {JobStatus.SCHEDULED, JobStatus.PAUSE},
+    JobStatus.SCHEDULED: {JobStatus.READY, JobStatus.PAUSE},
+    JobStatus.PAUSE: {JobStatus.RESUME},
+    JobStatus.RESUME: {JobStatus.SCHEDULED}, 
     JobStatus.READY: {JobStatus.RUNNING},
     JobStatus.RUNNING: {JobStatus.SUCCESS, JobStatus.FAILED},
     JobStatus.FAILED: {JobStatus.RETRYING, JobStatus.DEAD},

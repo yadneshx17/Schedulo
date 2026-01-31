@@ -1,7 +1,44 @@
+from typing import List, Optional
+
 from sqlalchemy import select
 
 from src.models import Job_Runs, Jobs
 from src.states.states import JobStatus, can_transition
+
+# CHECKS
+# 1. Owner
+# job.owner_id == request.owner_id
+
+
+async def get_job_by_id(job_id, db):
+    """Get a single job by ID"""
+    return (
+        await db.execute(select(Jobs).where(Jobs.id == job_id))
+    ).scalar_one_or_none()
+
+
+async def get_jobs_by_ids(job_ids: List, db) -> List[Jobs]:
+    """Get multiple jobs by list of IDs"""
+    if not job_ids:
+        return []
+    result = await db.execute(select(Jobs).where(Jobs.id.in_(job_ids)))
+    return result.scalars().all()
+
+
+async def get_all_jobs(db) -> List[Jobs]:
+    """Get Whole job list"""
+    result = await db.execute(select(Jobs))  #  never throws None -> []
+    return result.scalars().all()
+
+
+# async def _get_job_or_raise(job_id, owner_id, db):
+#     job = await get_job_by_id(job_id, db)
+#     if not job:
+#         # raise JobNotFound(job_id)
+#         return {"message": f"job: {job_id} does not found"}
+#     # if job.owner_id != owner_id:
+#     #     raise UnauthorizedJobAccess(job_id, owner_id)
+#     return job
 
 
 async def create_job(data, db):
@@ -26,34 +63,28 @@ async def create_job(data, db):
 
 
 async def get_job(job_id, db):
-    stmt = select(Jobs).where(Jobs.id == job_id)
-    result = await db.execute(stmt)
-    job = result.scalar_one_or_none()
-
+    job = await get_job_by_id(job_id, db)
     if not job:
         raise ValueError(f"Job {job_id} not found")
-
     return job
 
 
 async def list_jobs(db):
-    results = await db.execute(select(Jobs))
-    if not results:
-        raise ValueError("Jobs not found")
-
-    jobs = results.scalars().all()
+    jobs = await get_all_jobs(db)
     return {"jobs": jobs, "total": len(jobs), "page": 1, "size": len(jobs)}
 
 
 async def delete_job(force, job_id, db):
-    stmt = select(Jobs).where(Jobs.id == job_id)
-    result = await db.execute(stmt)
-    job = result.scalar_one_or_none()
+    job = await get_job_by_id(job_id, db)
 
     if not job:
         return {"message": f"job: {job_id} does not found"}
 
-    if not force and job.status in [JobStatus.RUNNING]:
+    if not force and job.status in [
+        JobStatus.RUNNING,
+        JobStatus.READY,
+        JobStatus.RETRYING,
+    ]:
         raise ValueError(
             f"Cannot delete job {job_id} in {job.status.value} status without force flag"
         )
@@ -64,9 +95,7 @@ async def delete_job(force, job_id, db):
 
 
 async def update_job(data, job_id, db):
-    stmt = select(Jobs).where(Jobs.id == job_id)
-    result = await db.execute(stmt)
-    job = result.scalar_one_or_none()
+    job = await get_job_by_id(job_id, db)
 
     if not job:
         raise ValueError(f"Job {job_id} not found")
@@ -82,6 +111,9 @@ async def update_job(data, job_id, db):
         job.recurring = data.recurring
     if data.interval is not None:
         job.interval = data.interval
+
+    # Only allow schedule config changes
+    # Recompute next_run_at via a function
     if data.next_run_at is not None:
         job.next_run_at = data.next_run_at
     if data.max_retries is not None:
@@ -94,40 +126,39 @@ async def update_job(data, job_id, db):
     await db.commit()
     await db.refresh(job)
     return job
- 
+
 
 # Actions
 async def pause_job(reason, job_id, db):
-    stmt = select(Jobs).where(Jobs.id == job_id)
-    result = await db.execute(stmt)
-    job = result.scalar_one_or_none()
+    # stmt = select(Jobs).where(Jobs.id == job_id)
+    # result = await db.execute(stmt)
+
+    # job = result.scalar_one_or_none()
+    job = await get_job_by_id(job_id, db)
 
     if not job:
         raise ValueError(f"Job {job_id} not found")
 
-    if not can_transition(job.status, JobStatus.PENDING):
+    if not can_transition(job.status, JobStatus.PAUSE):
         raise ValueError(f"Cannot pause job {job_id} from {job.status.value} status")
 
-    job.status = JobStatus.PENDING
+    job.status = JobStatus.PAUSE
     await db.commit()
     await db.refresh(job)
     return job
 
 
 async def resume_job(reason, job_id, db):
-    stmt = select(Jobs).where(Jobs.id == job_id)
-    result = await db.execute(stmt)
-    job = result.scalar_one_or_none()
+    job = await get_job_by_id(job_id, db)
 
     if not job:
-        raise ValueError(f"Job {job_id} not found")
+        return {"message": "Job not found"}
 
-    if job.status != JobStatus.PENDING:
-        raise ValueError(f"Cannot resume job {job_id} from {job.status.value} status")
-
-    job.status = JobStatus.SCHEDULED
-    await db.commit()
-    await db.refresh(job)
+    if job.status == JobStatus.PAUSE:
+        # need to recalculate the next_run_at
+        job.status = JobStatus.SCHEDULED
+        await db.commit()
+        await db.refresh(job)
     return job
 
 
@@ -136,21 +167,16 @@ async def job_runs(job_id, db):
     stmt = select(Job_Runs).where(Job_Runs.job_id == job_id)
     result = await db.execute(stmt)
     runs = result.scalars().all()
-    
-    return {
-        "runs": runs,
-        "total": len(runs),
-        "page": 1,
-        "size": len(runs)
-    }
+
+    return {"runs": runs, "total": len(runs), "page": 1, "size": len(runs)}
 
 
 async def job_run(job_id, run_id, db):
     stmt = select(Job_Runs).where(Job_Runs.job_id == job_id, Job_Runs.id == run_id)
     result = await db.execute(stmt)
     run = result.scalar_one_or_none()
-    
+
     if not run:
         raise ValueError(f"Job run {run_id} for job {job_id} not found")
-    
+
     return run
