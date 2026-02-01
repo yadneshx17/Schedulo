@@ -28,7 +28,7 @@ class JobRunSchedulerException(ScheduloException):
     pass
 
 
-class owner_id, (JobSchedulerException):
+class JobNotFound(JobSchedulerException):
     """Raised when a job is not found"""
 
     def __init__(self, job_id: str):
