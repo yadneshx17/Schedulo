@@ -9,7 +9,7 @@ from src.states import JobStatus, RetryStrategy, JobRunStatus
 
 class CreateJob(BaseModel):
     """Schema for creating a new job."""
-    owner_id: str = Field(..., description="ID of the job owner")
+    # owner_id: str = Field(..., description="ID of the job owner")
     task_type: str = Field(..., description="Type of task to execute")
     payload: str = Field(..., description="JSON payload containing task parameters")
     scheduled_fields: str = Field(..., description="JSON fields for scheduling configuration")
@@ -90,14 +90,14 @@ class JobRunListResponse(BaseModel):
     size: int = Field(..., description="Number of runs per page")
 
 
-class JobPauseRequest(BaseModel):
-    """Schema for pausing a job."""
-    reason: Optional[str] = Field(None, description="Reason for pausing the job")
+# class JobPauseRequest(BaseModel):
+#     """Schema for pausing a job."""
+#     reason: Optional[str] = Field(None, description="Reason for pausing the job")
 
 
-class JobResumeRequest(BaseModel):
-    """Schema for resuming a job."""
-    reason: Optional[str] = Field(None, description="Reason for resuming the job")
+# class JobResumeRequest(BaseModel):
+#     """Schema for resuming a job."""
+#     reason: Optional[str] = Field(None, description="Reason for resuming the job")
 
 
 class JobDeleteRequest(BaseModel):

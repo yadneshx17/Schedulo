@@ -1,13 +1,32 @@
-from typing import List, Optional
+from typing import List
 
 from sqlalchemy import select
 
+from src.core.Exceptions import (
+    JobCannotBeDeleted,
+    JobCannotPause,
+    JobCannotResume,
+    JobNotFound,
+    JobRunNotFound,
+    JobRunsNotFound,
+    UnauthorizedJobAccess,
+)
 from src.models import Job_Runs, Jobs
 from src.states.states import JobStatus, can_transition
 
 # CHECKS
 # 1. Owner
 # job.owner_id == request.owner_id
+
+
+async def _get_job_or_raise(job_id, owner_id, db):
+    """Get job by ID and validate ownership"""
+    job = await get_job_by_id(job_id, db)
+    if not job:
+        raise JobNotFound(str(job_id))
+    if job.owner_id != owner_id:
+        raise UnauthorizedJobAccess(str(job_id), owner_id)
+    return job
 
 
 async def get_job_by_id(job_id, db):
@@ -25,10 +44,26 @@ async def get_jobs_by_ids(job_ids: List, db) -> List[Jobs]:
     return result.scalars().all()
 
 
-async def get_all_jobs(db) -> List[Jobs]:
+async def get_all_jobs(owner_id, db) -> List[Jobs]:
     """Get Whole job list"""
     result = await db.execute(select(Jobs))  #  never throws None -> []
     return result.scalars().all()
+
+
+async def get_job_runs_by_job_id(job_id, db) -> List[Job_Runs]:
+    return (
+        (await db.execute(select(Job_Runs).where(Job_Runs.job_id == job_id)))
+        .scalars()
+        .all()
+    )
+
+
+async def get_job_run_by_id(job_id, run_id, db) -> List[Job_Runs]:
+    return (
+        await db.execute(
+            select(Job_Runs).where(Job_Runs.job_id == job_id, Job_Runs.id == run_id)
+        )
+    ).scalar_one_or_none()
 
 
 # async def _get_job_or_raise(job_id, owner_id, db):
@@ -41,15 +76,14 @@ async def get_all_jobs(db) -> List[Jobs]:
 #     return job
 
 
-async def create_job(data, db):
+async def create_job(data, x_owner_id, db):
     job = Jobs(
-        owner_id=data.owner_id,
+        owner_id=x_owner_id,
         task_type=data.task_type,
         payload=data.payload,
         scheduled_fields=data.scheduled_fields,
         recurring=data.recurring,
         interval=data.interval,
-        next_run_at=data.next_run_at,
         max_retries=data.max_retries,
         retry_backoff_seconds=data.retry_backoff_seconds,
         retry_strategy=data.retry_strategy,
@@ -62,43 +96,33 @@ async def create_job(data, db):
     return job
 
 
-async def get_job(job_id, db):
-    job = await get_job_by_id(job_id, db)
-    if not job:
-        raise ValueError(f"Job {job_id} not found")
-    return job
+async def get_job(job_id, owner_id, db):
+    return await _get_job_or_raise(job_id, owner_id, db)
 
 
-async def list_jobs(db):
-    jobs = await get_all_jobs(db)
+async def list_jobs(owner_id, db):
+    """List jobs filtered by owner_id"""
+    jobs = await get_all_jobs(owner_id, db)
     return {"jobs": jobs, "total": len(jobs), "page": 1, "size": len(jobs)}
 
 
-async def delete_job(force, job_id, db):
-    job = await get_job_by_id(job_id, db)
-
-    if not job:
-        return {"message": f"job: {job_id} does not found"}
+async def delete_job(force, job_id, owner_id, db):
+    job = await _get_job_or_raise(job_id, owner_id, db)
 
     if not force and job.status in [
         JobStatus.RUNNING,
         JobStatus.READY,
         JobStatus.RETRYING,
     ]:
-        raise ValueError(
-            f"Cannot delete job {job_id} in {job.status.value} status without force flag"
-        )
+        raise JobCannotBeDeleted(job_id, job.status.value)
 
     await db.delete(job)
     await db.commit()
     return {"message": f"Job {job_id} deleted successfully"}
 
 
-async def update_job(data, job_id, db):
-    job = await get_job_by_id(job_id, db)
-
-    if not job:
-        raise ValueError(f"Job {job_id} not found")
+async def update_job(data, job_id, owner_id, db):
+    job = await _get_job_or_raise(job_id, owner_id, db)
 
     # Update only provided fields
     if data.task_type is not None:
@@ -129,18 +153,11 @@ async def update_job(data, job_id, db):
 
 
 # Actions
-async def pause_job(reason, job_id, db):
-    # stmt = select(Jobs).where(Jobs.id == job_id)
-    # result = await db.execute(stmt)
-
-    # job = result.scalar_one_or_none()
-    job = await get_job_by_id(job_id, db)
-
-    if not job:
-        raise ValueError(f"Job {job_id} not found")
+async def pause_job(job_id, owner_id, db):
+    job = await _get_job_or_raise(job_id, owner_id, db)
 
     if not can_transition(job.status, JobStatus.PAUSE):
-        raise ValueError(f"Cannot pause job {job_id} from {job.status.value} status")
+        raise JobCannotPause(str(job_id), job.status.value)
 
     job.status = JobStatus.PAUSE
     await db.commit()
@@ -148,34 +165,29 @@ async def pause_job(reason, job_id, db):
     return job
 
 
-async def resume_job(reason, job_id, db):
-    job = await get_job_by_id(job_id, db)
+async def resume_job(job_id, owner_id, db):
+    job = await _get_job_or_raise(job_id, owner_id, db)
 
-    if not job:
-        return {"message": "Job not found"}
-
-    if job.status == JobStatus.PAUSE:
+    if job.status != JobStatus.PAUSE:
+        raise JobCannotResume(str(job_id), job.status.value)
         # need to recalculate the next_run_at
-        job.status = JobStatus.SCHEDULED
-        await db.commit()
-        await db.refresh(job)
+    job.status = JobStatus.SCHEDULED
+    await db.commit()
+    await db.refresh(job)
     return job
 
 
 # Job History
 async def job_runs(job_id, db):
-    stmt = select(Job_Runs).where(Job_Runs.job_id == job_id)
-    result = await db.execute(stmt)
-    runs = result.scalars().all()
+    # Verify job ownership before returning runs
+    runs = await get_job_runs_by_id(job_id, db)
 
     return {"runs": runs, "total": len(runs), "page": 1, "size": len(runs)}
 
 
 async def job_run(job_id, run_id, db):
-    stmt = select(Job_Runs).where(Job_Runs.job_id == job_id, Job_Runs.id == run_id)
-    result = await db.execute(stmt)
-    run = result.scalar_one_or_none()
-
+    # Verify job ownership before returning run
+    run = await get_job_run_by_id(job_id, run_id, db)
     if not run:
         raise ValueError(f"Job run {run_id} for job {job_id} not found")
 
